@@ -1,0 +1,52 @@
+#!/bin/bash
+#sleep and get interface up
+sleep 60
+#fix some networks
+ping -c 2 8.8.8.8
+#update
+yum update -y
+yum upgrade -y
+#get own mac address
+lmac1=$(ip a | grep 'link/ether' | awk '{print $2}' | sed -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/')
+lmac=$(echo $lmac1 | tr '[:lower:]' '[:upper:]')
+#echo $lmac > /root/mac
+#cd to /tmp
+cd /tmp
+#download config based on mac
+curl http://10.250.1.4/$lmac.conf >> /tmp/boot.conf
+#load the variables
+source boot.conf
+#remove network config
+rm /etc/sysconfig/network-scripts/ifcfg-ens3
+#write new network config
+echo 'TYPE=Ethernet' >> /etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'BOOTPROTO=none' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'DEFROUTE=yes' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'IPV4_FAILURE_FATAL=yes' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'IPV6INIT=no' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'NAME=ens3' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'DEVICE=ens3' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'ONBOOT=yes' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo "IPADDR=$iIPV4" >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+#echo 'PREFIX=20' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo "NETMASK=$iIPV4NM" >> /etc/sysconfig/network-scripts/ifcfg-ens3
+echo "GATEWAY=$iIPV4GW" >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+echo 'DNS1=8.8.8.8' >>	/etc/sysconfig/network-scripts/ifcfg-ens3
+#change root password
+echo "root:$iPASSWORD" | chpasswd
+#hostname
+sed -i.bak -e "s/RENAME/$iHOSTNAME/" /etc/hostname
+sed -i.bak -e "s/RENAME/$iHOSTNAME/" /etc/hosts
+#add authorized_keys
+mkdir -p /root/.ssh/
+echo "ssh-rsa $iSSHKEY installer-supplied-key" >> /root/.ssh/authorized_keys
+#rm ssh server keys
+rm /etc/ssh/ssh_host_*
+#remove autostart
+sed -i.bak -e 's/bash /#bash /' /sbin/ifup-local
+#remove config
+rm /tmp/boot.conf
+#remove script
+rm /root/auto.sh
+#reboot
+reboot

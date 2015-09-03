@@ -1,0 +1,133 @@
+#!/bin/bash
+#sets up machines with kvm-install image copy
+
+if [ "$1" == "-h" ]; then
+        echo 'Usage: new NAME CPUS RAM VNCPORT OS(deb7,deb8,ub12,ub14,ub15,centos6,centos7) LOCAL/REMOTE PASSWORD SSHKEY (RSA only, no ssh-rsa leading or comments) IPv4 IPv4-Netmask IPv4-Gateway' ; exit 0; fi
+
+
+#config
+##imagedir
+imgdir=/kvm/iso/
+##www dir
+wwwdir=/var/www/html/
+
+
+#OS source images
+debian7img=$imgdirDebian7.img.gz
+debian8img=$imgdirDebian8.img.gz
+ubuntu12img=$imgdirUbuntu12.img.gz
+ubuntu14img=$imgdirUbuntu14.img.gz
+ubuntu15img=$imgdirUbuntu15.img.gz
+centos6img=$imgdirCentOS6.img.gz
+centos7img=$imgdirCentOS7.img.gz
+
+
+#name of the machine, must be unique
+mname=${1}
+#cpus
+mcpus=${2}
+#ram
+mram=${3}
+#vnc port
+mvncp=${4}
+echo "Machine name is $mname, $mcpus CPU(s), $mramMB RAM"
+#os
+mos=${5}
+#local/remote
+mlocalremote=${6}
+#root password
+mrootpassword=${7}
+#root ssh key
+msshkey=${8}
+#ip4
+mipv4=${9}
+#ip4netmask
+mipv4_netmask=${10}
+#ipv4gateway
+mipv4_gateway=${11}
+#ip6
+mipv6=${12}
+#ip6netmask
+mipv6_netmask=${13}
+#ipv6gateway
+mipv6_gateway=${14}
+
+
+
+if [ "$mos" == "deb7" ]; then
+	echo "OS is Debian 7"
+        mos_install=$debian7img
+elif [ "$mos" == "deb8" ]; then
+	echo "OS is Debian 8"
+	mos_install=$debian8img
+elif [ "$mos" == "ub12" ]; then
+       	echo "OS is Ubuntu 12"
+        mos_install=$ubuntu12img
+elif [ "$mos" == "ub14" ]; then
+	echo "OS is Ubuntu 14"
+	mos_install=$ubuntu14img
+elif [ "$mos" == "ub15" ]; then
+	echo "OS is Ubuntu 15"
+	mos_install=$ubuntu15img
+elif [ "$mos" == "centos7" ]; then
+        echo "OS is CentOS 7"
+       	mos_install=$centos7img
+elif [ "$mos" == "centos6" ]; then
+        echo "OS is CentOS 6"
+        mos_install=$centos6img
+else
+	echo "Error: OS not found - exiting"
+	exit 1
+fi
+
+#generate a random mac address 
+vmmac=$(printf '5E:%02X:%02X:%02X:%02X:%02X\n' $[RANDOM%256] $[RANDOM%256] $[RANDOM%256])
+mvmmac=$(echo $vmmac | sed -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/')
+
+
+#echo config into passed file at $wwwdir$vmmac.conf
+#layout:
+#iHOSTNAME=
+#iPASSWORD=
+#iSSHKEY=
+#iIPV4=
+#iIPV4NM=
+#iIPV4GW=
+##iIPV6=
+##iIPV6NM=
+##iIPV6GW=
+
+#remove old config, if any
+rm -f $wwwdir$mvmmac.conf
+#echo new data in
+echo "iHOSTNAME='$mname'" >> $wwwdir$mvmmac.conf
+echo "iPASSWORD='$mrootpassword'" >> $wwwdir$mvmmac.conf
+echo "iSSHKEY='$msshkey'" >> $wwwdir$mvmmac.conf
+echo "iIPV4='$mipv4'" >> $wwwdir$mvmmac.conf
+echo "iIPV4NM='$mipv4_netmask'" >> $wwwdir$mvmmac.conf
+echo "iIPV4GW='$mipv4_gateway'" >> $wwwdir$mvmmac.conf
+#echo "iIPV6='$mipv6'" >> $wwwdir$mvmmac.conf
+#echo "iIPV6NM='$mipv6_netmask'" >> $wwwdir$mvmmac.conf
+#echo "iIPV6GW='$mipv6_gateway'" >> $wwwdir$mvmmac.conf
+chown nginx:nginx $wwwdir$mvmmac.conf
+echo "Config file created"
+
+if [ "$mlocalremote" == "LOCAL" ]; then
+	addc=""
+ elif [ "$mlocalremote" == "REMOTE" ]; then
+	addc="-r"
+else
+	echo "Error: LOCAL/REMOTE not specified"
+fi
+
+#Create vm
+newkvm -t none -n $mname -c $mcpus -m $mram -d $mos_install -i br0,$vmmac -v $mvncp $addc
+sleep 5
+virsh start $mname
+echo "Machine created"
+#sleep and paste result
+echo "Sleeping 240 seconds"
+sleep 240
+ping -c 4 $mipv4
+rm -f $wwwdir$mvmmac.conf
+#end

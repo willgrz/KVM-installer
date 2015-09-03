@@ -1,0 +1,59 @@
+#!/bin/bash
+#auto.sh for Debian and Ubuntu, requires sed rpl dpkg apt
+#sleep and get interface up
+sleep 60
+#fix network in some cases
+ping -c 2 8.8.8.8
+#update apt
+apt-get update -y
+#upgrade packages
+apt-get upgrade -y
+#remove some packages
+apt-get remove -y iceweasel >>/dev/null
+#get own mac address
+lmac1=$(ifconfig | grep eth0 | awk '{print $5}' | sed -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/' -e 's/:/-/')
+lmac=$(echo $lmac1 | tr '[:lower:]' '[:upper:]')
+#cd to /tmp
+cd /tmp
+#download config based on mac
+wget -q http://10.250.1.4/$lmac.conf -O /tmp/boot.conf
+#load the variables
+source boot.conf
+#remove network config
+rm /etc/network/interfaces
+#write new network config
+echo '# The loopback network interface' >> /etc/network/interfaces
+echo 'auto lo' >> /etc/network/interfaces
+echo 'iface lo inet loopback' >> /etc/network/interfaces
+echo '# The primary network interface' >> /etc/network/interfaces
+echo 'allow-hotplug eth0' >> /etc/network/interfaces
+echo 'iface eth0 inet static' >> /etc/network/interfaces
+echo "dns-nameservers 8.8.8.8" >> /etc/network/interfaces
+echo "address $iIPV4" >> /etc/network/interfaces
+echo "netmask $iIPV4NM" >> /etc/network/interfaces
+echo "gateway $iIPV4GW" >> /etc/network/interfaces
+#echo 'iface eth0 inet6 static' >> /etc/network/interfaces
+#echo "address $iIPV6" >> /etc/network/interfaces
+#echo "netmask $iIPV6NM" >> /etc/network/interfaces
+#echo "gateway $iIPV6GW" >> /etc/network/interfaces
+#change root password
+echo "root:$iPASSWORD" | chpasswd
+#hostname
+rpl -q 'RENAME' $iHOSTNAME /etc/hostname
+rpl -q 'RENAME' $iHOSTNAME /etc/hosts
+rpl -q '10.250.5.10' $iIPV4 /etc/hosts
+#add authorized_keys
+mkdir -p /root/.ssh/
+echo "ssh-rsa $iSSHKEY installer-supplied-key" >> /root/.ssh/authorized_keys
+#rm ssh server keys
+rm /etc/ssh/ssh_host_*
+dpkg-reconfigure openssh-server
+#remove autostart
+rpl -q 'bash' '#bash' /etc/rc.local
+#remove config
+rm /tmp/boot.conf
+#remove script
+rm /root/auto.sh
+#reboot
+reboot
+

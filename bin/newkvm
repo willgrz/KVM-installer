@@ -1,0 +1,239 @@
+#!/bin/bash
+
+EXITCODE=1
+
+config='
+deb7	debian-7.8.0-amd64-CD-1.iso			linux	debianwheezy	--disk path="{BASEPATH_ISO}/debian-7.8.0-amd64-CD-1.iso",device=cdrom,perms=ro
+deb8	debian-8.0.0-amd64-CD-1.iso			linux	debianwheezy	--disk path="{BASEPATH_ISO}/debian-8.0.0-amd64-CD-1.iso",device=cdrom,perms=ro
+ubt14d	ubuntu-14.04.2-desktop-amd64.iso	linux	debianwheezy		--disk path="{BASEPATH_ISO}/ubuntu-14.04.2-desktop-amd64.iso",device=cdrom,perms=ro
+ubt12	ubuntu-12.04.5-server-amd64.iso		linux	debianwheezy		--disk path="{BASEPATH_ISO}/ubuntu-12.04.5-server-amd64.iso",device=cdrom,perms=ro
+ubt14	ubuntu-14.04.2-server-amd64.iso		linux	debianwheezy		--disk path="{BASEPATH_ISO}/ubuntu-14.04.2-server-amd64.iso",device=cdrom,perms=ro
+ubt15	ubuntu-15.04-server-amd64.iso		linux	debianwheezy		--disk path="{BASEPATH_ISO}/ubuntu-15.04-server-amd64.iso",device=cdrom,perms=ro
+grml	grml64-full_2014.11.iso			linux	debianwheezy		--disk path="{BASEPATH_ISO}/grml64-full_2014.11.iso",device=cdrom,perms=ro
+win7hp	Windows.7.Home.Premium.x64.en-US.iso	windows	win7			--disk path="{BASEPATH_ISO}/Windows.7.Home.Premium.x64.en-US.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+win7pro	Windows.7.Pro.x64.en-US.iso		windows	win7			--disk path="{BASEPATH_ISO}/Windows.7.Pro.x64.en-US.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+win8	Windows.8.iso				windows win7			--disk path="{BASEPATH_ISO}/Windows.8.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+win8.1	Windows.8.1.iso				windows	win7			--disk path="{BASEPATH_ISO}/Windows.8.1.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+w2012	Windows.Server.2012.Eval.x64.iso	windows	win2k8			--disk path="{BASEPATH_ISO}/Windows.Server.2012.Eval.x64.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+w2012r2	Windows.Server.2012.R2.Eval.x64.iso	windows	win2k8			--disk path="{BASEPATH_ISO}/Windows.Server.2012.R2.Eval.x64.iso",device=cdrom,perms=ro --disk path="{BASEPATH_ISO}/virtio-win-0.1-100.iso",device=cdrom,perms=ro
+centos7 CentOS-7-x86_64-Minimal-1503-01.iso	linux	debianwheezy		--disk path="{BASEPATH_ISO}/CentOS-7-x86_64-Minimal-1503-01.iso",device=cdrom,perms=ro
+centos6	CentOS-6.6-x86_64-minimal.iso		linux	debianwheezy		--disk path="{BASEPATH_ISO}/CentOS-6.6-x86_64-minimal.iso",device=cdrom,perms=ro
+nocps	NOC-PS-1-0-r11.iso			linux	debianwheezy		--disk path="{BASEPATH_ISO}/NOC-PS-1-0-r11.iso",device=cdrom,perms=ro
+none	-									linux	debianwheezy	--noreboot --import
+'
+
+BASEPATH_ISO="/kvm/iso"
+BASEPATH_IMG_LOCAL="/kvm/img"
+BASEPATH_IMG_REMOTE="/kvm/nfs"
+
+die() {
+	if [ "x$2" != "x" ]; then
+		code="$1"
+		mesg="$2"
+	elif [ "x$1" != "x" ]; then
+		code="1"
+		mesg="$1"
+	else
+		code="1"
+		mesg="An unknown error occurred"
+	fi
+	echo "$mesg - exiting immediately" 1>&2
+	exit "$code" > /dev/null 2> /dev/null
+}
+
+config_by_template() {
+	echo "$config" | awk '$1 == "'"$1"'"' | head -n1
+}
+
+namegen() {
+	cat /dev/urandom | tr -d -c '[:lower:][:digit:]' | head -c 8
+}
+
+macgen() {
+	printf 'DE:AD:BE:EF:%02X:%02X\n' $((RANDOM%256)) $((RANDOM%256))
+}
+
+vncgen() {
+	echo -n $(($RANDOM%$((65536-1025))+1025))
+}
+
+interfacegen() {
+	interfaces=$(ip r g 255.255.255.255 | head -n 1 | sed -r 's/.* dev ([^ ]+) .*/\1/'; ls -d1 /sys/class/net/* | sed -r 's/.*\/([^\/]+)$/\1/')
+	for interface in $interfaces; do
+		read -p "Use interface $interface on host node for interface of this KVM (anything else than "'"y"'" means no)? " answer
+		if [ "x$answer" == "xy" ]; then
+			break
+		fi
+	done
+	if [ "x$answer" != "xy" ]; then
+		return
+		# die 3 "Interface lookup defined but no usable interface found"
+	fi
+	echo -n $interface
+}
+
+helpgen() {
+	# Print help text and exit 1
+	echo "Usage: newkvm [OPTION...]"
+	echo ""
+	echo "  -h, --help                       show this help list and exit"
+	echo "  -n, --name[=NAME]                name of the new kvm machine"
+	echo "                                   unset/default=generate a random name"
+	echo "  -c, --cpus[=CPUS]                amount of cpu cores to assign"
+	echo "                                   unset/default=1"
+    echo "  -m, --ram[=RAM]                  amount of ram to assign"
+	echo "                                   unset/default=256M"
+	echo "  -d, --disk=DISK                  disk size to assign or full path to existing image (will be copied) (gzip supported)"
+	echo "                                   multiple use allowed"
+	echo "  -r, --remote[=REMOTE]            remote location of the disk image"
+	echo "                                   unset=$BASEPATH_IMG_LOCAL; default=$BASEPATH_IMG_REMOTE"
+	echo "  -v, --vnc[=VNCPORT]              VNC port to be used"
+	echo "                                   default=generate a random port between 1024 and 65536"
+	echo "  -t, --template=TEMPLATE          template name to use (see script for examples)"
+	echo "                                   this argument is mandatory"
+	echo "  -i, --interface[=INTERFACE,MAC]  set interface and mac addressto use for this KVM"
+	echo "                                   INTERFACE and MAC are both optional arguments, example:"
+	echo "                                   -i eth0(,) will create an interface with eth0 with a random mac address"
+	echo "                                   -i (,)AA:BB:CC:DD:EE:FF will create an interface with a fixed mac, the if will then be determined interactively"
+	echo "                                   -i eth0,AA:BB:CC:DD:EE:FF will create an interface with eth0 and a fixed mac"
+	echo "                                   multiple use allowed"
+	echo "                                   default=trying to find interface in interactive mode/generate mac"
+	echo ""
+	echo " Exit codes:"
+	echo "  0  KVM has been created successfully"
+	echo "  1  An unknown error occurred, check stderr for more information"
+	echo "  2  Exiting due to help text being displayed"
+	echo "  3  Interactive interface lookup failed"
+	echo "  4  A mandatory argument has not been provided"
+	exit 2
+}
+
+NAME="$(namegen)"
+CPUS="1"
+RAM="512M"
+DISKS=""
+VNC=""
+INTERFACES="$INTERFACES"
+BASEPATH_IMG="$BASEPATH_IMG_LOCAL"
+TEMPLATE=""
+while [ "x$#" != "x0" ]; do
+	value=""
+	case "$1" in
+		-h|--help)
+			helpgen
+		;;
+		-n|--name|-n=*|--name=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			NAME="${value:-$NAME}"
+		;;
+		-c|--cpus|-c=*|--cpus=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			CPUS="${value:-$CPUS}"
+		;;
+		-m|--ram|-m=*|--ram=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			RAM="${value:-$RAM}"
+		;;
+		-d|--disk|-d=*|--disk=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			DISKS="$DISKS${value:-10G} "
+		;;
+		-m|--ram|-m=*|--ram=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			RAM="${value:-$RAM}"
+		;;
+		-r|--remote|-r=*|--remote=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			BASEPATH_IMG="${value:-$BASEPATH_IMG_REMOTE}"
+		;;
+		-v|--vnc|-v=*|--vnc=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			VNC="${value:-$(vncgen)}"
+		;;
+		-t|--template|-t=*|--template=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			TEMPLATE="${value:-$TEMPLATE}"
+		;;
+		-i|--interface|-i=*|--interface=*)
+			value=$(echo -n "$1" | sed -r 's/^--?[a-z]+=//')
+			[ "x$value" == "x$1" ] && value=""
+			[ "x$value" == "x" ] && [ "x${2:0:1}" != "x-" ] && value="$2" && shift
+			ifname=$(echo "$value" | awk -F, '{print $1}')
+			ifmac=$(echo "$value" | awk -F, '{print $2}')
+			[ "x${ifname:2:1}${ifname:5:1}${ifname:8:1}${ifname:11:1}${ifname:14:1}" == "x:::::" ] && ifmac="$ifname" && ifname=""
+			INTERFACE="${ifname:-$(interfacegen)},${ifmac:-$(macgen)}"
+			[ "x${INTERFACE:0:1}" == "x," ] && die 3 "Interface lookup requested but no usable interface found"
+			INTERFACES="$INTERFACES$INTERFACE "
+		;;
+	esac
+	shift
+done
+
+if [ "x$TEMPLATE" == "x" ]; then
+	die 4 "template parameter is mandatory"
+fi
+
+#echo "NAME=$NAME"
+#echo "CPUS=$CPUS"
+#echo "RAM=$RAM"
+#echo "DISKS=$DISKS"
+#echo "VNC=$VNC"
+#echo "INTERFACES=$INTERFACES"
+#echo "BASEPATH_IMG=$BASEPATH_IMG"
+
+finalparams=""
+
+diskid=0
+for disk in $DISKS; do
+        if [ "x${disk:0:1}" == "x/" ]; then
+       	#check if image is gzipd
+               	gzip --list ${disk} >>/dev/null
+                if [ "$?" == "0" ]; then
+                     #is gzip - gunzip into new image
+                        gunzip -dc $disk >"$BASEPATH_IMG/${NAME}_$diskid.img"
+                 else
+                       	#is no gzip - run rsync
+                    rsync -z --progress "$disk" "$BASEPATH_IMG/${NAME}_$diskid.img"
+            	fi
+        else
+        	qemu-img create -f raw $BASEPATH_IMG/${NAME}_$diskid.img "$disk"G
+	fi
+	finalparams="$finalparams--disk path="'"'"$BASEPATH_IMG/${NAME}_$diskid.img"'"'",device=disk,bus=virtio "
+	diskid=$(($diskid+1))
+done
+
+for interface in $INTERFACES; do
+	bridge=$(echo -n "$interface" | awk -F, '{print $1}')
+	mac=$(echo -n "$interface" | awk -F, '{print $2}')
+#	mac=$(printf '5E:%02X:%02X:%02X:%02X:%02X\n' $[RANDOM%256] $[RANDOM%256] $[RANDOM%256])
+	finalparams="$finalparams--network bridge=$bridge,model=e1000,mac=$mac "
+done
+
+if [ "x$VNC" != "x" ]; then
+	finalparams="$finalparams--graphics vnc,port=$VNC,keymap=de"
+fi
+
+config=$(config_by_template "$TEMPLATE")
+isofile=$(echo "$config" | awk '{print $2}')
+ostype=$(echo "$config" | awk '{print $3}')
+osvariant=$(echo "$config" | awk '{print $4}')
+addparams=$(echo "$config" | awk '{$1="";$2="";$3="";$4="";print $0}' | sed "s!{BASEPATH_ISO}!$BASEPATH_ISO!g")
+
+virt-install --cpu core2duo --virt-type kvm --noautoconsole --machine pc-i440fx-rhel7.0.0 --name "$NAME" --os-type "$ostype" --os-variant "$osvariant" --ram "$RAM" --vcpus="$CPUS" $finalparams $addparams
+
