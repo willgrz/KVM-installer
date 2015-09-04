@@ -1,2 +1,3 @@
-#setting hostname in centos6 is broken
+#setting hostname in centos6 is broken, no idea why
 #debian works on pretty much anything even remotely debian based, like ubuntu etc
+#centos should work on fedora
