@@ -4,6 +4,8 @@
 #edit wwwdir in kvmsetup
 #edit iso path in newkvm
 #edit RAW file location for LOCAL and REMOTE in newkvm
+#edit CPU type (if desired, defaults to core2duo)
+#edit machine type if you do not use centos7 and/or qemu 2.0.0 (default "pc", list with "qemu-kvm -machine ?")
 #
 ##Usage:
 #Create new installer images:
@@ -18,3 +20,4 @@
 #Install KVM from image:
 #run "kvmsetup -h" for design of command, ex.:
 #kvmsetup test 1 1024 12012 centos6 REMOTE r00tpw AAAAB3NzaC1yc2EAAAADAQABAAABAQD7Sc4g1FqP3I2DXq/2NPUhG9/9fUAB445EeNnVP07zK5Y3dtW/w12ZY8Pzpvhpvp61M8pakOIp2g3i1RkvKdHOLmNsby8ytTrCNgQELFAkTWxxjuOxvHDHrXe5rhk3bJir6eS/ck8B9tO1mvzpF+mEXDpt5VNvHbJA1c3m8cPz/ViMdEJsaZ2crTzvWkAGaq0hfj2Wt2Ug6/Os7f/NKX5XUjIYIH/UGOIzZacxHcNOw5zjYBBqET4qAbu1borBplGCqfU6cfvojJukBTPf1KB3PUfEvrwVf/SJ6ldDDv1pbMAwfQAlOVVdqKTPOvxKTDA+UJkOXlwquFIpB9Cv0BD9 10.250.5.12 255.255.240.0 10.250.0.1
+#
